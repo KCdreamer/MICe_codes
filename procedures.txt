@@ -1,0 +1,242 @@
+export FIDDIR="."
+export IMGDIR="."
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/axiom2/projects/software/arch/linux-x86_64-glibc2_3/matlab2010b/runtime/glnxa64:/axiom2/projects/software/arch/linux-x86_64-glibc2_3/matlab2010b/bin/glnxa64:/projects/souris/jbishop/bin;
+
+
+***it is easier to just delete the unwanted files first***
+
+for i in {1..16}; do echo mincconcat -concat_dimension time DW_Recon.${i}.*.mnc DW_Recon.${i}.mnc -clobber; done | parallel;
+
+***make high b***
+for i in {1..16}; do echo mincreshape -2 -quiet -clobber -dimrange time=1,60 DW_Recon.${i}.mnc tmp_${i}; done | parallel -j 6; for i in `seq 1 16`; do mincaverage -2 -quiet -clobber -avgdim time tmp_${i} DW_Recon.${i}_highb.mnc; done; # do this after to save time rm tmp_*;
+
+***make b0***
+for i in {1..16}; do echo mincreshape -2 -quiet -clobber -dimrange time=61,5 DW_Recon.${i}.mnc tmp_${i}; done | parallel -j 6; for i in `seq 1 16`; do mincaverage -2 -quiet -clobber -avgdim time tmp_${i} DW_Recon.${i}_b0.mnc; done; rm tmp_*;
+
+export TMPDIR="/hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_subset/tmp/"; export PATH="/home/jscholz/bin/micescripts:$PATH"; source /etc/fsl/5.0/fsl.sh
+
+***making the FSL nii.gz files***
+for file in *.mnc; do base=`basename $file .mnc`; echo ~jscholz/bin/micescripts/miceconvert $file ${base}_FSL; done | parallel
+
+(for file in *_FSL.nii.gz; do base=`basename $file .nii.gz`; echo fslmaths $file -Tmean -mul 0 -add 1 ${base}_mask; done | parallel)
+
+***edit bvecs and bvals file to subset values***
+
+mincmath -seg -const2 a 1000000 *_highb.mnc *_mask.mnc -clobber
+
+mincmorph -successive EEEEDDDDDD *_mask.mnc *_mask.morph.mnc -clobber
+
+for file in *.mnc; do base=`basename $file .mnc`; echo ~jscholz/bin/micescripts/miceconvert $file ${base}_FSL; done | parallel
+
+***open amico script in matlab***
+
+AMICO_fsl2scheme bvals bvecs 21oct16_subset1.scheme
+
+***coverting AMICO files from nii to mnc***
+for i in 2 3 5 6 7 8 9 11 12 14 15; do cd /hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_official/AMICO_results_official_brain${i}; gzip *.nii; done;
+
+for i in 2 3 5 6 7 8 9 11 12 14 15; do for j in dir ICVF ISOVF OD; do cd /hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_official/AMICO_results_official_brain${i}; echo ~jscholz/bin/micescripts/miceconvert FIT_${j}_official_brain${i}.nii.gz FIT_${j}_official_brain${i}.mnc; done; done
+
+***Distortion Correcting AMICO files***
+for i in 2 3 5 6 7 8 9 10 11 12 14 15; do cd /hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_official/AMICO_results_official_brain${i}; for j in dir ICVF ISOVF OD; do /micehome/matthijs/32-bit/bin/distortion_correction_september_2014.pl -output-dir /hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_official/Distortion_Corrected_AMICO_brain${i}/ FIT_${j}_official_brain${i}.mnc:${i}; done; done
+
+***TRANSFORMING AMICO FILES***
+for i in *dist_corr; do xfmconcat ${i}/transforms/${i}_to_basket_mouse_brain_78micron_lsq6_0.xfm ${i}/transforms/${i}-avg-lsq12.xfm ${i}/transforms/${i}-final-nlin.xfm ${i}/transforms/${i}_from_native.xfm; done | parallel
+
+for k in 1pe15_3j30 1j30_1pe15_2j30 2pe15_2j30 1j30_1pe15_1j30_1pe15 1pe15_1j30_1pe15_1j30 1pe15_2j30_1pe15; do for i in 2 3 5 6 7 8 9 10 11 12; do for j in OD ICVF ISOVF dir; do echo mincresample -like /hpf/largeprojects/MICe/kchu/mecp2_all_nlin/mecp2_all-nlin-3.mnc -transformation /hpf/largeprojects/MICe/kchu/mecp2_all_processed/DW_Recon.${i}_03feb17_b0.sept2014_dist_corr/transforms/*from_native.xfm /hpf/largeprojects/MICe/kchu/fid/03feb17.fid/03feb17.fid_official/direction_${k}/Distortion_Corrected_AMICO_brain${i}/FIT_${j}_official_${k}_brain${i}.sept2014_dist_corr.mnc /hpf/largeprojects/MICe/kchu/fid/03feb17.fid/03feb17.fid_official/direction_${k}/Distortion_Corrected_AMICO_brain${i}/FIT_${j}_official_${k}_brain${i}_xfm.mnc; done | parallel; done; done
+Note: RED means you might have to change the files names
+
+for i in *_xfm.mnc; do base=`basename $i .mnc`; echo mincblur -fwhm 0.2 $i ${base}; done | parallel
+
+***renaming AMICO output files with a useful for loop***
+for i in 2 3 5 6 7 8 9 11 12 14 15; do for j in dir ICVF ISOVF OD; do cd /hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_subset8/AMICO_results_subset8_brain${i}; mv FIT_${j}.nii FIT_${j}_s8_brain${i}.nii; done; done
+
+***when using MAGet.py to get atlas on the brains***
+first make sure you have your files needed stored/copied to a much shorter directory name (this is just how MAGet works) and then work in that directory
+MAGeT.py --atlas-library=/hpf/largeprojects/MICe/tools/atlases/Dorr_2008/ex-vivo/ --output-dir=full_maget --no-pairwise --registration-method=minctracc AMICO_21oct16-nlin-3.mnc --num-executors=4 --proc=1 –mem=4
+
+minc_label_ops --select 336,305 full_maget_more_labels/anonymous-pipeline-17-04-2017-at-10-04-53/mecp2_all-nlin-3/labels/mecp2_all-nlin-3_to_DSURQE_40micron_average_base_7-input-labels.mnc  full_maget_more_labels/anonymous-pipeline-17-04-2017-at-10-04-53/mecp2_all-nlin-3/labels/mecp2_all-nlin-3_to_DSURQE_40micron_average_base_7-input-labels_3_CA10r.mnc
+
+minc_label_ops --binarize full_maget_more_labels/anonymous-pipeline-17-04-2017-at-10-04-53/mecp2_all-nlin-3/labels/mecp2_all-nlin-3_to_DSURQE_40micron_average_base_7-input-labels_3_CA10r.mnc full_maget_more_labels/anonymous-pipeline-17-04-2017-at-10-04-53/mecp2_all-nlin-3/labels/mecp2_all-nlin-3_to_DSURQE_40micron_average_base_7-input-labels_3_CA10r_binary.mnc
+
+***Transfering to R***
+ls -1 /hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_official/Distortion_Corrected_AMICO_brain10/*_xfm.mnc > files.csv
+
+***can edit the csv file to have multiple columns separated by commas (,)***
+
+gf<-read.csv("files.csv")
+gf$sizes <- factor(gf$sizes, levels = c("small", "medium", "large"))
+values<-anatGetAll(gf$Filenames,"/hpf/largeprojects/MICe/kchu/AMICO_21oct16_resampled_atlas/AMICO_21oct16-nlin-3_votedlabels.mnc", method="means") #for volumes, take out the method argument
+values
+values_combined<-anatCombineStructures(values,method="means")
+values_combined
+values_combined[1]
+values_combined[1,
+values_combined[1,]
+values_combined[,1]
+values_combined_frame<-data.frame(values_combined)
+values_combined_frame$amygdala
+values_combined_frame$hippocampus
+values_combined[,1]
+values_combined[1,]
+q()
+
+***To analyze the data (example)***
+subset(gf,Subset==1 | Subset==3)
+gf_1and3<-subset(gf,Subset==1 | Subset==3)
+values_1and3<-subset(values,gf$Subset==1 | gf$Subset==3)
+vs<-anatLm(Filenames~Subset,gf_1and3,values_1and3)
+qvals<-anatFDR(vs)
+qvals #tells you the threshold of the significant difference
+vs #contains the stats values
+vs[,]
+values
+values[,]
+write.csv(values,"Values.csv")
+write.csv(t(values),"Values.csv")
+write.csv(t(data.frame(gf,values)),"Values.csv")
+values_combined<-anatCombineStructures(values,method="means")
+values_combined
+write.csv(t(data.frame(gf,values_combined)),"Values.csv")
+gf_1and4<-subset(gf,Subset==1 | Subset==4)
+values_combined_1and4<-subset(values,gf$Subset==1 | gf$Subset==4)
+vs<-anatLm(Filenames~Subset,gf_1and4,values_combined_1and4)
+values_combined_1and4<-subset(values_combined,gf$Subset==1 | gf$Subset==4)
+vs<-anatLm(Filenames~Subset,gf_1and4,values_combined_1and4)
+qvals<-anatFDR(vs)
+qvals
+vs[,]
+DATA<-data.frame(gf,values_combined)
+#just use barci
+barci(Subset,amygdala,data=DATA)
+barci(Subset,corpus_callosum,data=DATA)
+qplot(Subset,corpus_callosum,data=DATA)
+qplot(Subset,corpus_callosum,data=DATA,geom="boxplot")
+qplot(Subset,corpus_callosum,data=DATA,geom="boxplot",fill=Subset)
+qplot(Subset,corpus_callosum,data=DATA,fill=Subset)
+qplot(Subset,corpus_callosum,data=DATA,geom="bar",fill=Subset)
+qplot(Subset,corpus_callosum,data=DATA,fill=Subset)
+qplot(Subset,corpus_callosum,data=DATA)
+qplot(Subset,corpus_callosum,data=DATA,color=Genotype)
+qplot(Subset,corpus_callosum,data=DATA,color=BrainNumber)
+qplot(Subset,cerebral_cortex_occipital_lobe,data=DATA,color=BrainNumber)
+barci(Subset,cerebral_cortex_occipital_lobe,data=DATA,color=BrainNumber)
+barci(Subset,cerebral_cortex_occipital_lobe,data=DATA,color=BrainNumber)+geom_point()
+cairo_pdf("Plot.pdf")
+barci(Subset,cerebral_cortex_occipital_lobe,data=DATA,color=BrainNumber)+geom_point()+geom_text(aes(label=BrainNumber),hjust=-1, vjust=0)
+dev.off()
+geom_jitter()
+theme(axis.text.x=element_text(angle=30,hjust=1))
+
+barci(Direction,corpus_callosum,data=DATA_ICVF_dir,color=Genotype)+geom_point()+theme(text = element_text(size=20),axis.text.x=element_text(angle=30,hjust=1))
+
+evince Plot.pdf
+inkscape
+
+barci(Genotype,cerebral_cortex_frontal_lobe,data=data_subset1)+geom_point()+geom_text(aes(label=BrainNumber),hjust=-1, vjust=0)
+can set ylim or xlim in the barci function
+
+
+
+
+***To plot whole brain volume***
+#generated another input file called “files_volumes.csv”, and just follow the same steps as before in creating gf,values etc.
+
+brainvols<-rowSums(values_volume)
+brainvols
+barci(Genotype,brainvols,data=data_volume)+geom_point()+geom_text(aes(label=BrainNumber),hjust=-1, vjust=0)
+
+***To plot the fancy brain volume maps***
+mask="/hpf/largeprojects/MICe/kchu/AMICO_21oct16_resampled_atlas/mask_morph.mnc"
+vs<-mincLm(Filenames~Genotype,gf_volume,mask=mask)
+qvals<-mincFDR(vs,mask=mask,method="FDR")
+qvals
+anatVol<-mincGetVolume("/hpf/largeprojects/MICe/kchu/AMICO_21oct16_nlin/AMICO_21oct16-nlin-3.mnc")
+gf_volume
+gf_volume$Genotype
+gf_volume$Genotype<-as.factor(gf_volume$Genotype)
+gf_volume$Genotype
+vs<-mincLm(Filenames~Genotype,gf_volume,mask=mask)
+qvals<-mincFDR(vs,mask=mask,method="FDR")
+qvals
+library(plotrix)
+mincPlotSliceSeries(mincArray(anatVol),mincArray(vs,"tvalue-Genotype1"),anatLow=500,anatHigh=2000,low=2.53,high=8,begin=40,end=180,symmetric=TRUE,legend="T-Stats")
+
+can always replace anatVol with whatever backgroud you want, for example the average of my ICVF maps within one subset
+
+opar <- par(bg=graycolours[1])
+mincImage(mincArray(avg_ICVF_official_vol),slice=120,axes=F,low=0,high=1,col=graycolours)
+mincImage(mincArray(ICVF_diff_trial_masked),slice=120,axes=F,low=0.1,high=0.5,add=T,col=poscolours,underTransparent=T)
+mincImage(mincArray(ICVF_diff_trial_masked),slice=120,axes=F,low=-0.1,high=-0.5,add=T,col=negcolours,underTransparent=T)
+color.legend(20, -10, 70, 0, c("-0.3", "-0.1"), rev(negcolours), col="white", align="rb")
+color.legend(90, -10, 140, 0, c("0.1", "0.3"), poscolours, col="white", align="rb")
+
+
+***plotting effect size***
+group.means<-mincMean(gf_ICVF_blur_1$Filenames,gf_ICVF_blur_1$Genotype)
+group.sd<-mincSd(gf_ICVF_blur_1$Filenames,gf_ICVF_blur_1$Genotype)
+ES<-(group.means[,"1"]-group.means[,"0"])/group.sd[,"0"]
+ES<-ES*bimask
+ES,"ES.mnc",gf_ICVF_blur_1$Filenames[1])
+mincImage(mincArray(avg_ICVF_official_vol),slice=120,axes=F,low=0,high=1,col=graycolours)
+mincImage(mincArray(ES),slice=120,axes=F,low=0.1,high=10,symmetric=T,add=T,col=heat.colors(255),underTransparent=T)
+
+***SNR ANAYLSIS***
+use mincGetVolume for the files as well as the ROIs for signal and noise.
+minc_vols <- lapply(gf_snr$Filenames, mincGetVolume)
+both_masks <- bimask_noise + (bimask_signal * 2)
+mean_tables <- lapply(minc_vols, function(vol) tapply(vol, both_masks, mean))
+sd_tables <- lapply(minc_vols, function(vol) tapply(vol, both_masks, sd))
+snr <- mapply(function(m, s) m[3] / s[2], m = mean_tables, s = sd_tables)
+t(simplify2array(snr)) ---- visualize the matrix
+sapply(mean_tables, function(m) m[3]) ---- visualize the column
+
+***GIBBS Ringing in MATLAB***
+directory with the software: /hpf/largeprojects/MICe/kchu/unring_gibbs/
+global AMICO_code_path AMICO_data_path CAMINO_path CONFIG
+global niiSIGNAL niiMASK
+global KERNELS bMATRIX
+
+% Path definition: adapt these to your needs
+% ==========================================
+AMICO_code_path = '/hpf/largeprojects/MICe/kchu/fid/23sep16.fid_20160923T153932/AMICO_tool/matlab';
+AMICO_data_path = pwd;
+CAMINO_path     = '/axiom2/projects/software/arch/linux-precise/matlab-toolboxes/camino/bin';
+NODDI_path      = '/axiom2/projects/software/arch/linux-precise/matlab-toolboxes/NODDI_toolbox_v0.9';
+SPAMS_path      = '/axiom2/projects/software/arch/linux-precise/matlab-toolboxes/spams-matlab';
+
+if ~isdeployed
+    addpath( genpath(NODDI_path) )
+    addpath( fullfile(SPAMS_path,'build') )
+    addpath( fullfile(AMICO_code_path,'kernels') )
+    addpath( fullfile(AMICO_code_path,'models') )
+    addpath( fullfile(AMICO_code_path,'optimization') )
+    addpath( fullfile(AMICO_code_path,'other') )
+    addpath( fullfile(AMICO_code_path,'vendor','NIFTI') )
+end
+niiSIGNAL = load_untouch_nii( input nii filename );
+niiSIGNAL.img = single(niiSIGNAL.img);
+niiSIGNAL.img = reshape(niiSIGNAL.img,niiSIGNAL.hdr.dime.dim(2:5));
+
+outSIGNAL.img = unring(niiSIGNAL.img)
+outSIGNAL.hdr = niiSIGNAL.hdr
+outSIGNAL.untouch = 1
+save_untouch_nii(outSIGNAL, 'destination/output_filename')
+
+***new atlas***
+/hpf/largeprojects/MICe/tools/atlases/Dorr_2008_Steadman_2013_Ullmann_2013_Richards_2011_Qiu_2016_Egan_2015_40micron/
+
+***when want to use ggplot to plot multiple data on the sme plot***
+ggplot()+geom_point(mapping=aes(x=ISOVF,y=ICVF,colour="NODDI"),data=values_NODDI_ICVF_cor_ISOVF_dataframe)+geom_point(mapping=aes(x=ISOVF,y=ICVF,colour="AMICO"),data=values_AMICO_ICVF_cor_ISOVF_dataframe)+scale_colour_manual(name="Method",breaks=c("NODDI","AMICO"),values=c(NODDI="red",AMICO="blue"))+theme(text = element_text(size=20))
+
+png(filename = "Rplot%03d.png",
+    width = 480, height = 480, units = "px", pointsize = 12,
+     bg = "white",  res = NA, ...,
+    type = c("cairo", "cairo-png", "Xlib", "quartz"), antialias)
+
+f <- "/hpf/largeprojects/MICe/kchu/fid/21oct16.fid_20161021T151945/21oct16.fid_official/AMICO_results_official_brain10/FIT_ICVF.mnc"
+mf <- mincArray(mincGetVolume(f))
+
+library(RMINC)
+
+mincPlotSliceSeries(anatomy=mf, dimension = 2, begin = 2, end=240, mfrow = c(10,10))
